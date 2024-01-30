@@ -1,0 +1,83 @@
+
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.keys import Keys
+import time
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import re
+from urllib.parse import urljoin
+from urllib.request import urlopen
+import networkx as nx
+
+op = Options()
+#op.add_argument('--kiosk')
+s = Service(ChromeDriverManager().install())
+
+
+def hash_crawl(start_url): #A function which takes a list of urls for #Oslo and #Bergen as shown in line 79. 
+    all_visited_hashtags = []
+    g = nx.Graph()
+    
+    for start in start_url: #This for loop extracts the 20 first hashtags from Oslo and then from Bergen. 
+        driver = webdriver.Chrome(service=s, options=op)
+        driver.get(start)
+        wait= WebDriverWait(driver,10).until(EC.presence_of_all_elements_located((By.XPATH,"//div[@class='v-card__text body-1 text--primary tweet-text']")))
+        bs = BeautifulSoup(driver.page_source,'html.parser')
+
+        visited_url = []
+        url_hashtags = []
+        count = 0
+        for tag in bs.find_all('a',{'href':re.compile('^/hashtag/?')}):
+            if count==20: #Note: Even when i put the count to 20, the amount of hashtags which are traversed are varying for every time i run the program.
+                 #Sometimes the program can extract 20 hashtags, or sometimes less than what the condition requires.
+                break
+            else:
+                try:
+                    full_url = urljoin(start, tag['href'])
+                    if full_url not in visited_url and tag.text.startswith('#'):
+                        g.add_node(tag.text)
+                        visited_url.append(full_url) #Appending the urls of the hashtags which we have extracted inorder to crawl and then extract all hashtags later in the program. 
+                        all_visited_hashtags.append(tag.text) #appends all the visited hashtags to this list.
+                        url_hashtags.append(tag.text) #appends only the hashtag texts which will later be crawled. 
+                        count+=1
+                    else:
+                        continue
+                
+                except:
+                    continue
+        driver.quit()
+    
+        for link in range(len(visited_url)): #This for-loop will crawl through the urls of the 20 first hashtags we extracted starting from #Oslo and #Bergen. 
+            try: 
+                driver = webdriver.Chrome(service=s, options =op)
+                driver.get(visited_url[link])
+                wait = WebDriverWait(driver,10).until(EC.presence_of_all_elements_located((By.XPATH,"//div[@class='v-card__text body-1 text--primary tweet-text']")))
+                bs = BeautifulSoup(driver.page_source, 'html.parser')
+                for tag in bs.find_all('a',{'href':re.compile('^/hashtag/?')}):
+                    hash_name = tag.text
+                    #print(hash_name)
+                    if hash_name not in all_visited_hashtags and hash_name.startswith('#'):
+                        g.add_node(hash_name) #If the hash_name does not exit, we create a new node. 
+                        g.add_edge(url_hashtags[link],hash_name)
+                        all_visited_hashtags.append(hash_name)
+                    else:
+                        g.add_edge(url_hashtags[link],hash_name) #Orelse we create an edge to the node its connecting to. 
+            
+            except:
+                continue
+            driver.quit()
+    
+    #print(all_visited_hashtags)
+    return g #This returns the number of nodes and edges presented in the graph. 
+
+
+graph = hash_crawl(['https://www.sotwe.com/search/%23Oslo','https://www.sotwe.com/search/%23Bergen'])
+print(graph)
+
+with open('Sotwe.graphml','wb') as ufile: #Creating a graphml file. 
+    nx.write_graphml(graph,ufile)
